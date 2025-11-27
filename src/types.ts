@@ -12,20 +12,19 @@ export interface Question {
 export interface SectionConfig {
     id: string;
     name: string;
+    sectionInstruction: string; // Customizable instruction (e.g., "Answer 10 Questions. Each carries 2 Marks.")
     questionCount: number;
     marksPerQuestion: number;
     type: 'Short' | 'Long' | 'Mixed';
-    difficultyDistribution: {
-        Easy: number;
-        Average: number;
-        Tough: number;
-    };
+    questionDifficulties: ('Easy' | 'Average' | 'Tough')[]; // One per question (or 2 per question if OR pattern)
+    questionUnits: number[]; // Unit (1-5) for each question (or 2 per question if OR pattern)
     isOrPattern: boolean; // For "Either/Or" sections
 }
 
 export interface ExamConfig {
     time: number; // in minutes
     totalMarks: number;
+    headerText: string; // Customizable header (e.g., "EXAM PAPER")
     sections: SectionConfig[];
 }
 

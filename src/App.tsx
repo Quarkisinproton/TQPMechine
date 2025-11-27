@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { ExamConfigForm } from './components/ExamConfigForm';
-import { Question, ExamConfig } from './types';
+import type { Question, ExamConfig } from './types';
 import { generateExamPaper } from './services/questionSelector';
 import { generateDocx } from './services/docxGenerator';
+import { Packer } from 'docx';
 import { saveAs } from 'file-saver';
-import { Download, CheckCircle, AlertCircle } from 'lucide-react';
+import { CheckCircle } from 'lucide-react';
 
 function App() {
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -19,7 +20,8 @@ function App() {
   const handleGenerate = async (config: ExamConfig) => {
     try {
       const paper = generateExamPaper(questions, config);
-      const blob = await generateDocx(paper);
+      const doc = generateDocx(paper);
+      const blob = await Packer.toBlob(doc);
       saveAs(blob, 'ExamPaper.docx');
       setStep('done');
     } catch (error) {

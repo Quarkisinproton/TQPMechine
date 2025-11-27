@@ -17,11 +17,22 @@ const verify = async () => {
     const buf = fs.readFileSync(excelPath);
     const workbook = XLSX.read(buf, { type: 'buffer' });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const jsonData = XLSX.utils.sheet_to_json(sheet);
-    console.log("Raw JSON first row:", jsonData[0]);
-    process.exit(0);
 
-    // Map to Question interface (Copying logic from excelParser.ts for Node)
+    // Find header row using sheet_to_json (more robust)
+    const allRows = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+    let headerRowIndex = 0;
+    for (let i = 0; i < allRows.length; i++) {
+        const row = allRows[i];
+        if (row && row.some((cell: any) => cell && cell.toString().toLowerCase().includes('question number'))) {
+            headerRowIndex = i;
+            break;
+        }
+    }
+    console.log("Found header at row:", headerRowIndex);
+    // Empirically need +1 (maybe range is 1-based or something)
+    const jsonData = XLSX.utils.sheet_to_json(sheet, { range: headerRowIndex + 1 });
+
+    // Map to Question interface
     const questions: Question[] = jsonData.map((row: any, index: number) => ({
         id: index,
         questionNumber: row['Question Number'] || index + 1,
@@ -35,31 +46,35 @@ const verify = async () => {
     }));
 
     console.log(`Parsed ${questions.length} questions.`);
-    console.log("Unique Types:", [...new Set(questions.map(q => q.type))]);
-    console.log("Unique Complexities:", [...new Set(questions.map(q => q.complexity))]);
-    console.log("First 5 questions:", questions.slice(0, 5));
+    console.log(`Types: Short=${questions.filter(q => q.type === 'Short').length}, Long=${questions.filter(q => q.type === 'Long').length}`);
+    console.log(`Units: ${[1, 2, 3, 4, 5].map(u => `U${u}=${questions.filter(q => q.unit === u).length}`).join(', ')}`);
 
     // 2. Define Config
     const config: ExamConfig = {
         time: 180,
         totalMarks: 70,
+        headerText: 'EXAM PAPER',
         sections: [
             {
                 id: '1',
-                name: 'Section A',
+                name: 'Section A - Short Answer Questions',
+                sectionInstruction: 'Answer all 5 questions. Each carries 4 Marks.',
                 questionCount: 5,
                 marksPerQuestion: 4,
                 type: 'Short',
-                difficultyDistribution: { Easy: 2, Average: 2, Tough: 1 },
+                questionDifficulties: ['Easy', 'Easy', 'Average', 'Average', 'Tough'],
+                questionUnits: [1, 2, 3, 4, 5],
                 isOrPattern: false,
             },
             {
                 id: '2',
-                name: 'Section B',
+                name: 'Section B - Long Answer Questions',
+                sectionInstruction: 'Answer 5 questions, choosing one option from each pair. Each carries 10 Marks.',
                 questionCount: 5,
                 marksPerQuestion: 10,
                 type: 'Long',
-                difficultyDistribution: { Easy: 1, Average: 3, Tough: 1 },
+                questionDifficulties: ['Easy', 'Average', 'Average', 'Average', 'Average', 'Tough', 'Tough', 'Average', 'Average', 'Tough'],
+                questionUnits: [1, 1, 2, 2, 3, 3, 4, 4, 5, 5],
                 isOrPattern: true,
             }
         ]

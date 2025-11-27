@@ -47,37 +47,46 @@ const selectQuestionsForSection = (
         ) || null;
     };
 
-    // Distribution Logic
-    let requirements: ('Easy' | 'Average' | 'Tough')[] = [];
-    for (let i = 0; i < config.difficultyDistribution.Easy; i++) requirements.push('Easy');
-    for (let i = 0; i < config.difficultyDistribution.Average; i++) requirements.push('Average');
-    for (let i = 0; i < config.difficultyDistribution.Tough; i++) requirements.push('Tough');
 
-    while (requirements.length < config.questionCount) {
+
+
+    // Distribution Logic - now using questionDifficulties and questionUnits arrays
+    // For OR pattern: arrays have 2 entries per question (pairs)
+    // For normal: arrays have 1 entry per question
+    const requirements = config.questionDifficulties.slice(0, config.isOrPattern ? config.questionCount * 2 : config.questionCount);
+    const units = config.questionUnits.slice(0, config.isOrPattern ? config.questionCount * 2 : config.questionCount);
+
+    // Ensure we have exactly the right number of requirements
+    const targetLength = config.isOrPattern ? config.questionCount * 2 : config.questionCount;
+    while (requirements.length < targetLength) {
         requirements.push('Average');
     }
-    requirements = requirements.slice(0, config.questionCount);
-    requirements.sort(() => 0.5 - Math.random());
+    while (units.length < targetLength) {
+        units.push(1);
+    }
 
-    let currentUnit = 1;
-    const maxUnit = 5;
 
-    for (const difficulty of requirements) {
+    let requirementIndex = 0;
+    for (let i = 0; i < config.questionCount; i++) {
         if (config.isOrPattern) {
-            // OR Pattern: Need 2 questions from SAME unit
-            // 1. Try strict: Correct Unit, Correct Difficulty
-            let q1 = findQuestion(difficulty, currentUnit, usedQuestionIds);
-            let q2 = findQuestion(difficulty, currentUnit, new Set(q1 ? [q1.id] : []));
+            // OR Pattern: Need 2 questions from SAME unit with the specified difficulties
+            const difficulty1 = requirements[requirementIndex] || 'Average';
+            const difficulty2 = requirements[requirementIndex + 1] || 'Average';
+            const targetUnit = units[requirementIndex] || 1; // Both should be from this unit
+            requirementIndex += 2;
 
-            // 2. Relax Difficulty: Correct Unit, Any Difficulty
-            if (!q1) q1 = findQuestion(null, currentUnit, usedQuestionIds);
-            if (q1 && !q2) q2 = findQuestion(null, currentUnit, new Set([q1.id]));
+            // Find 2 questions from the target unit
+            let q1 = findQuestion(difficulty1, targetUnit, usedQuestionIds);
+            let q2 = findQuestion(difficulty2, targetUnit, new Set(q1 ? [q1.id] : []));
 
-            // 3. Relax Unit: Any Unit (that has 2 questions), Any Difficulty
+            // Fallback: Relax difficulty if strict match fails
+            if (!q1) q1 = findQuestion(null, targetUnit, usedQuestionIds);
+            if (q1 && !q2) q2 = findQuestion(null, targetUnit, new Set([q1.id]));
+
+            // Further fallback: Try any unit if target unit doesn't have 2 questions
             if (!q1 || !q2) {
-                // Try to find ANY unit that has 2 available questions
-                for (let u = 1; u <= maxUnit; u++) {
-                    if (u === currentUnit) continue; // Already tried
+                for (let u = 1; u <= 5; u++) {
+                    if (u === targetUnit) continue;
                     const backupQ1 = findQuestion(null, u, usedQuestionIds);
                     const backupQ2 = findQuestion(null, u, new Set(backupQ1 ? [backupQ1.id] : []));
                     if (backupQ1 && backupQ2) {
@@ -93,33 +102,34 @@ const selectQuestionsForSection = (
                 usedQuestionIds.add(q1.id);
                 usedQuestionIds.add(q2.id);
             } else {
-                console.warn(`Not enough questions for OR pattern (Target Unit: ${currentUnit})`);
+                console.warn(`Not enough questions for OR pattern (Target Unit: ${targetUnit})`);
             }
 
-            currentUnit = (currentUnit % maxUnit) + 1;
-
         } else {
-            // Normal Pattern
-            // 1. Try strict: Correct Unit, Correct Difficulty
-            let q = findQuestion(difficulty, currentUnit, usedQuestionIds);
+            // Normal Pattern: Use specified unit and difficulty
+            const difficulty = requirements[requirementIndex] || 'Average';
+            const targetUnit = units[requirementIndex] || 1;
+            requirementIndex++;
 
-            // 2. Relax Unit: Any Unit, Correct Difficulty
+            // Try to find question from target unit with target difficulty
+            let q = findQuestion(difficulty, targetUnit, usedQuestionIds);
+
+            // Fallback 1: Target unit, any difficulty
+            if (!q) q = findQuestion(null, targetUnit, usedQuestionIds);
+
+            // Fallback 2: Any unit, target difficulty
             if (!q) q = findQuestion(difficulty, undefined, usedQuestionIds);
 
-            // 3. Relax Difficulty: Correct Unit, Any Difficulty
-            if (!q) q = findQuestion(null, currentUnit, usedQuestionIds);
-
-            // 4. Relax All: Any Question
+            // Fallback 3: Any question
             if (!q) q = findQuestion(null, undefined, usedQuestionIds);
 
             if (q) {
                 selected.push(q);
                 usedQuestionIds.add(q.id);
             }
-
-            currentUnit = (currentUnit % maxUnit) + 1;
         }
     }
+
 
     return selected;
 };

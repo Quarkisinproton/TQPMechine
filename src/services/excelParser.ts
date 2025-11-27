@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { Question } from '../types';
+import type { Question } from '../types';
 
 export const parseExcel = async (file: File): Promise<Question[]> => {
     return new Promise((resolve, reject) => {
@@ -11,7 +11,20 @@ export const parseExcel = async (file: File): Promise<Question[]> => {
                 const workbook = XLSX.read(data, { type: 'binary' });
                 const sheetName = workbook.SheetNames[0];
                 const sheet = workbook.Sheets[sheetName];
-                const jsonData = XLSX.utils.sheet_to_json(sheet);
+
+                // Find header row
+                const allRows = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+                let headerRowIndex = 0;
+                for (let i = 0; i < allRows.length; i++) {
+                    const row = allRows[i];
+                    if (row && row.some((cell: any) => cell && cell.toString().toLowerCase().includes('question number'))) {
+                        headerRowIndex = i;
+                        break;
+                    }
+                }
+
+                // Empirically need +1
+                const jsonData = XLSX.utils.sheet_to_json(sheet, { range: headerRowIndex + 1 });
 
                 const questions: Question[] = jsonData.map((row: any, index: number) => {
                     // Map Excel columns to our interface

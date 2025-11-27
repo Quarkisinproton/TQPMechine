@@ -1,7 +1,7 @@
-import React, { useCallback } from 'react';
+import React from 'react';
 import { Upload, FileSpreadsheet } from 'lucide-react';
 import { parseExcel } from '../services/excelParser';
-import { Question } from '../types';
+import type { Question } from '../types';
 
 interface FileUploadProps {
     onUpload: (questions: Question[]) => void;

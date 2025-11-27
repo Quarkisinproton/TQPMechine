@@ -1,6 +1,18 @@
 import React, { useState } from 'react';
 import { Plus, Trash2, Settings } from 'lucide-react';
-import { ExamConfig, SectionConfig } from '../types';
+import type { ExamConfig, SectionConfig } from '../types';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
+
+const modules = {
+    toolbar: [
+        [{ 'header': [1, 2, false] }],
+        ['bold', 'italic', 'underline'],
+        [{ 'align': [] }],
+        ['clean']
+    ],
+};
+
 
 interface ExamConfigFormProps {
     onGenerate: (config: ExamConfig) => void;
@@ -9,23 +21,28 @@ interface ExamConfigFormProps {
 export const ExamConfigForm: React.FC<ExamConfigFormProps> = ({ onGenerate }) => {
     const [time, setTime] = useState(180);
     const [totalMarks, setTotalMarks] = useState(70);
+    const [headerText, setHeaderText] = useState('EXAM PAPER');
     const [sections, setSections] = useState<SectionConfig[]>([
         {
             id: '1',
             name: 'Section A',
+            sectionInstruction: 'Answer all questions. Each carries 4 Marks.',
             questionCount: 5,
             marksPerQuestion: 4,
             type: 'Short',
-            difficultyDistribution: { Easy: 2, Average: 2, Tough: 1 },
+            questionDifficulties: ['Easy', 'Easy', 'Average', 'Average', 'Tough'],
+            questionUnits: [1, 2, 3, 4, 5], // Rotate through units
             isOrPattern: false,
         },
         {
             id: '2',
             name: 'Section B',
+            sectionInstruction: 'Answer 5 questions. Each carries 10 Marks.',
             questionCount: 5,
             marksPerQuestion: 10,
             type: 'Long',
-            difficultyDistribution: { Easy: 1, Average: 3, Tough: 1 },
+            questionDifficulties: ['Easy', 'Average', 'Average', 'Average', 'Average', 'Tough', 'Tough', 'Average', 'Average', 'Tough'], // 10 for 5 OR questions
+            questionUnits: [1, 1, 2, 2, 3, 3, 4, 4, 5, 5], // Pairs from same unit for OR
             isOrPattern: true,
         }
     ]);
@@ -36,10 +53,12 @@ export const ExamConfigForm: React.FC<ExamConfigFormProps> = ({ onGenerate }) =>
             {
                 id: Date.now().toString(),
                 name: `Section ${String.fromCharCode(65 + sections.length)}`,
+                sectionInstruction: 'Answer all questions.',
                 questionCount: 5,
                 marksPerQuestion: 10,
                 type: 'Long',
-                difficultyDistribution: { Easy: 1, Average: 3, Tough: 1 },
+                questionDifficulties: ['Average', 'Average', 'Average', 'Average', 'Average'],
+                questionUnits: [1, 2, 3, 4, 5],
                 isOrPattern: false,
             }
         ]);
@@ -49,10 +68,104 @@ export const ExamConfigForm: React.FC<ExamConfigFormProps> = ({ onGenerate }) =>
         setSections(sections.map(s => s.id === id ? { ...s, [field]: value } : s));
     };
 
-    const updateDistribution = (id: string, type: 'Easy' | 'Average' | 'Tough', value: number) => {
-        setSections(sections.map(s =>
-            s.id === id ? { ...s, difficultyDistribution: { ...s.difficultyDistribution, [type]: value } } : s
-        ));
+
+    const updateQuestionCount = (id: string, count: number) => {
+        setSections(sections.map(s => {
+            if (s.id !== id) return s;
+
+            // For OR pattern, we need 2 entries per question (Option A and Option B)
+            const targetLength = s.isOrPattern ? count * 2 : count;
+
+            // Update difficulties array
+            const newDifficulties = [...s.questionDifficulties];
+            if (targetLength > newDifficulties.length) {
+                while (newDifficulties.length < targetLength) {
+                    newDifficulties.push('Average');
+                }
+            } else {
+                newDifficulties.length = targetLength;
+            }
+
+            // Update units array
+            const newUnits = [...s.questionUnits];
+            if (targetLength > newUnits.length) {
+                // Add more units, rotating through 1-5
+                let nextUnit = newUnits.length > 0 ? ((newUnits[newUnits.length - 1] % 5) + 1) : 1;
+                while (newUnits.length < targetLength) {
+                    newUnits.push(nextUnit);
+                    if (s.isOrPattern && newUnits.length < targetLength) { // Ensure we don't exceed targetLength
+                        // For OR pattern, pairs should have the same unit
+                        newUnits.push(nextUnit);
+                    }
+                    nextUnit = (nextUnit % 5) + 1;
+                }
+                newUnits.length = targetLength; // Trim if we added too many
+            } else {
+                newUnits.length = targetLength;
+            }
+
+            return { ...s, questionCount: count, questionDifficulties: newDifficulties, questionUnits: newUnits };
+        }));
+    };
+
+    const updateQuestionDifficulty = (sectionId: string, questionIndex: number, difficulty: 'Easy' | 'Average' | 'Tough') => {
+        setSections(sections.map(s => {
+            if (s.id !== sectionId) return s;
+            const newDifficulties = [...s.questionDifficulties];
+            newDifficulties[questionIndex] = difficulty;
+            return { ...s, questionDifficulties: newDifficulties };
+        }));
+    };
+
+    const updateQuestionUnit = (sectionId: string, questionIndex: number, unit: number) => {
+        setSections(sections.map(s => {
+            if (s.id !== sectionId) return s;
+            const newUnits = [...s.questionUnits];
+            newUnits[questionIndex] = unit;
+
+            // For OR pattern, both options in a pair should have the same unit
+            if (s.isOrPattern && questionIndex % 2 === 0) {
+                newUnits[questionIndex + 1] = unit; // Update Option B to match Option A
+            } else if (s.isOrPattern && questionIndex % 2 === 1) {
+                newUnits[questionIndex - 1] = unit; // Update Option A to match Option B
+            }
+
+            return { ...s, questionUnits: newUnits };
+        }));
+    };
+
+    const toggleOrPattern = (id: string, enabled: boolean) => {
+        setSections(sections.map(s => {
+            if (s.id !== id) return s;
+
+            // Calculate the target array size
+            const targetLength = enabled ? s.questionCount * 2 : s.questionCount;
+
+            let newDifficulties = [...s.questionDifficulties];
+            let newUnits = [...s.questionUnits];
+
+            if (enabled && newDifficulties.length === s.questionCount) {
+                // Switching from normal to OR: double the arrays by duplicating each entry
+                newDifficulties = newDifficulties.flatMap(d => [d, d]);
+                newUnits = newUnits.flatMap(u => [u, u]); // Same unit for both options in OR pair
+            } else if (!enabled && newDifficulties.length === s.questionCount * 2) {
+                // Switching from OR to normal: take every other entry
+                newDifficulties = newDifficulties.filter((_, idx) => idx % 2 === 0);
+                newUnits = newUnits.filter((_, idx) => idx % 2 === 0);
+            }
+
+            // Ensure correct length
+            while (newDifficulties.length < targetLength) {
+                newDifficulties.push('Average');
+            }
+            while (newUnits.length < targetLength) {
+                newUnits.push(1);
+            }
+            newDifficulties.length = targetLength;
+            newUnits.length = targetLength;
+
+            return { ...s, isOrPattern: enabled, questionDifficulties: newDifficulties, questionUnits: newUnits };
+        }));
     };
 
     const removeSection = (id: string) => {
@@ -61,7 +174,7 @@ export const ExamConfigForm: React.FC<ExamConfigFormProps> = ({ onGenerate }) =>
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onGenerate({ time, totalMarks, sections });
+        onGenerate({ time, totalMarks, headerText, sections });
     };
 
     return (
@@ -71,6 +184,16 @@ export const ExamConfigForm: React.FC<ExamConfigFormProps> = ({ onGenerate }) =>
                 <div className="flex items-center gap-2 mb-4">
                     <Settings className="text-gray-400" size={20} />
                     <h3 className="text-lg font-medium text-gray-900">Exam Details</h3>
+                </div>
+                <div className="mb-6">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Header Text</label>
+                    <ReactQuill
+                        theme="snow"
+                        value={headerText}
+                        onChange={setHeaderText}
+                        modules={modules}
+                        className="bg-white"
+                    />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
@@ -107,7 +230,7 @@ export const ExamConfigForm: React.FC<ExamConfigFormProps> = ({ onGenerate }) =>
                     </button>
                 </div>
 
-                {sections.map((section, index) => (
+                {sections.map((section) => (
                     <div key={section.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 relative group">
                         <button
                             type="button"
@@ -141,14 +264,27 @@ export const ExamConfigForm: React.FC<ExamConfigFormProps> = ({ onGenerate }) =>
                             </div>
                         </div>
 
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Section Instruction</label>
+                            <textarea
+                                value={section.sectionInstruction}
+                                onChange={(e) => updateSection(section.id, 'sectionInstruction', e.target.value)}
+                                placeholder="Answer all questions. Each carries X Marks."
+                                rows={2}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                            />
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Num Questions</label>
                                 <input
                                     type="number"
                                     value={section.questionCount}
-                                    onChange={(e) => updateSection(section.id, 'questionCount', Number(e.target.value))}
+                                    onChange={(e) => updateQuestionCount(section.id, Number(e.target.value))}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                                    min="1"
+                                    max="20"
                                 />
                             </div>
                             <div>
@@ -165,7 +301,7 @@ export const ExamConfigForm: React.FC<ExamConfigFormProps> = ({ onGenerate }) =>
                                     <input
                                         type="checkbox"
                                         checked={section.isOrPattern}
-                                        onChange={(e) => updateSection(section.id, 'isOrPattern', e.target.checked)}
+                                        onChange={(e) => toggleOrPattern(section.id, e.target.checked)}
                                         className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                                     />
                                     <span className="text-sm text-gray-700">Enable "OR" Pattern</span>
@@ -173,36 +309,99 @@ export const ExamConfigForm: React.FC<ExamConfigFormProps> = ({ onGenerate }) =>
                             </div>
                         </div>
 
+                        {/* Individual Question Difficulty & Unit Selectors */}
                         <div className="bg-gray-50 p-4 rounded-lg">
-                            <span className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Difficulty Distribution</span>
-                            <div className="grid grid-cols-3 gap-4">
-                                <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Easy</label>
-                                    <input
-                                        type="number"
-                                        value={section.difficultyDistribution.Easy}
-                                        onChange={(e) => updateDistribution(section.id, 'Easy', Number(e.target.value))}
-                                        className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Average</label>
-                                    <input
-                                        type="number"
-                                        value={section.difficultyDistribution.Average}
-                                        onChange={(e) => updateDistribution(section.id, 'Average', Number(e.target.value))}
-                                        className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Tough</label>
-                                    <input
-                                        type="number"
-                                        value={section.difficultyDistribution.Tough}
-                                        onChange={(e) => updateDistribution(section.id, 'Tough', Number(e.target.value))}
-                                        className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
-                                    />
-                                </div>
+                            <span className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                                Question Configuration {section.isOrPattern && "(Option A & B for each)"}
+                            </span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {section.isOrPattern ? (
+                                    // OR Pattern: Show pairs (Option A and Option B for each question)
+                                    Array.from({ length: section.questionCount }).map((_, qIdx) => (
+                                        <div key={qIdx} className="bg-white p-3 rounded border border-gray-200">
+                                            <label className="block text-xs font-medium text-gray-600 mb-2">
+                                                Question {qIdx + 1} <span className="text-[10px] text-gray-400">(Unit {section.questionUnits[qIdx * 2] || 1})</span>
+                                            </label>
+                                            <div className="space-y-2">
+                                                <div>
+                                                    <label className="block text-[10px] text-gray-500 mb-1">Unit (both options)</label>
+                                                    <select
+                                                        value={section.questionUnits[qIdx * 2] || 1}
+                                                        onChange={(e) => updateQuestionUnit(section.id, qIdx * 2, Number(e.target.value))}
+                                                        className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                    >
+                                                        <option value={1}>Unit 1</option>
+                                                        <option value={2}>Unit 2</option>
+                                                        <option value={3}>Unit 3</option>
+                                                        <option value={4}>Unit 4</option>
+                                                        <option value={5}>Unit 5</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-gray-500 mb-1">Option A Difficulty</label>
+                                                    <select
+                                                        value={section.questionDifficulties[qIdx * 2] || 'Average'}
+                                                        onChange={(e) => updateQuestionDifficulty(section.id, qIdx * 2, e.target.value as 'Easy' | 'Average' | 'Tough')}
+                                                        className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                    >
+                                                        <option value="Easy">Easy</option>
+                                                        <option value="Average">Average</option>
+                                                        <option value="Tough">Tough</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-gray-500 mb-1">Option B Difficulty</label>
+                                                    <select
+                                                        value={section.questionDifficulties[qIdx * 2 + 1] || 'Average'}
+                                                        onChange={(e) => updateQuestionDifficulty(section.id, qIdx * 2 + 1, e.target.value as 'Easy' | 'Average' | 'Tough')}
+                                                        className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                    >
+                                                        <option value="Easy">Easy</option>
+                                                        <option value="Average">Average</option>
+                                                        <option value="Tough">Tough</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : (
+                                    // Normal Pattern: One difficulty and unit per question
+                                    section.questionDifficulties.map((difficulty, idx) => (
+                                        <div key={idx} className="bg-white p-3 rounded border border-gray-200">
+                                            <label className="block text-xs font-medium text-gray-600 mb-2">
+                                                Question {idx + 1}
+                                            </label>
+                                            <div className="space-y-2">
+                                                <div>
+                                                    <label className="block text-[10px] text-gray-500 mb-1">Unit</label>
+                                                    <select
+                                                        value={section.questionUnits[idx] || 1}
+                                                        onChange={(e) => updateQuestionUnit(section.id, idx, Number(e.target.value))}
+                                                        className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                    >
+                                                        <option value={1}>Unit 1</option>
+                                                        <option value={2}>Unit 2</option>
+                                                        <option value={3}>Unit 3</option>
+                                                        <option value={4}>Unit 4</option>
+                                                        <option value={5}>Unit 5</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-gray-500 mb-1">Difficulty</label>
+                                                    <select
+                                                        value={difficulty}
+                                                        onChange={(e) => updateQuestionDifficulty(section.id, idx, e.target.value as 'Easy' | 'Average' | 'Tough')}
+                                                        className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                    >
+                                                        <option value="Easy">Easy</option>
+                                                        <option value="Average">Average</option>
+                                                        <option value="Tough">Tough</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
                             </div>
                         </div>
                     </div>
